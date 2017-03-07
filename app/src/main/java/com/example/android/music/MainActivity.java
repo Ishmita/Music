@@ -1,6 +1,8 @@
 package com.example.android.music;
 
 import android.media.MediaPlayer;
+import android.os.Handler;
+import android.os.Message;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.text.Editable;
@@ -20,11 +22,13 @@ public class MainActivity extends AppCompatActivity {
     public EditText notesEditText;
     public ImageButton play, pause;
     String notesString, notes[], dots[];
-    boolean isReleased;
+    public ArrayList<Integer> positions = new ArrayList<>();
+    boolean isReleased = true;
     public MediaPlayer mediaPlayer;
     public MusicThread musicThread;
     public HashMap noteSound = new HashMap();
     public ArrayList<String> notesList = new ArrayList<>();
+    public Handler handler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -74,23 +78,35 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        handler = new Handler() {
+            public void handleMessage (Message msg) {
+                //disable stop button after sound sequence finishes.
+                pause.setEnabled(false);
+                pause.setBackgroundColor(getResources().getColor(R.color.disabled));
+
+                //enable play button after sound sequence finishes.
+                play.setEnabled(true);
+                play.setBackgroundColor(getResources().getColor(R.color.colorPrimary));
+            }
+        };
+
         play.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                boolean isValid = true;
-                pause.setEnabled(true);
-                pause.setBackgroundColor(getResources().getColor(R.color.colorPrimary));
-                notesString = notesEditText.getText().toString().toLowerCase();
-                checkNotes();
+
+                String temp = notesEditText.getText().toString().toLowerCase();
+                notesString = temp.replace(" ", "");
                 dots = notesString.split("[^.]+");
-                for (String dot:dots) {
-                    if(dot.length()>5) {
-                        Toast.makeText(MainActivity.this, "Invalid Input", Toast.LENGTH_SHORT).show();
-                        isValid = false;
-                        break;
-                    }
-                }
-                if(isValid) {
+                boolean validInput = checkNotes();
+
+                if(isReleased && validInput) {
+                    Log.d(TAG, "just before playing");
+                    //disable play button till current sound sequence finishes.
+                    play.setEnabled(false);
+                    play.setBackgroundColor(getResources().getColor(R.color.disabled));
+
+                    pause.setEnabled(true);
+                    pause.setBackgroundColor(getResources().getColor(R.color.colorPrimary));
                     musicThread = new MusicThread();
                     musicThread.start();
                 }
@@ -100,31 +116,57 @@ public class MainActivity extends AppCompatActivity {
         pause.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                if(mediaPlayer!=null && !isReleased) {
-                    mediaPlayer.stop();
-                }
-                    musicThread.interrupt();
+                musicThread.interrupt();
             }
         });
+
+
     }
 
-    public void checkNotes() {
+    public boolean checkNotes() {
         notes = notesString.split("[.]+");
+        int i = 0, j = 0, lenDots = dots.length;
+        notesList.clear();
+        positions.clear();
+
         for (String note: notes) {
+            Log.d(TAG, "current note: " + note);
+
             if(noteSound.containsKey(note)) {
+                Log.d(TAG, "straight added note: " + note);
                 notesList.add(note);
+                if (j < lenDots - 1) {
+                    Log.d(TAG, "dots after " + (i+1) + "are: " + dots[j+1]);
+                    positions.add(i);
+                    i++;                //increment note number
+                    j++;                //increment dot number
+                }
             }else {
+                Log.d(TAG, "needs splitting: " + note);
                 String s = separateNotes(note);
                 if(s!= null) {
                     String str[] = s.split(" ");
                     for (String string: str) {
+                        Log.d(TAG, "after splitting each node: " +string);
                         notesList.add(string);
+                    }
+                    if (j < lenDots - 1) {
+                        Log.d(TAG, "dots after " + (i+str.length) + " are: " + dots[j+1]);
+                        positions.add(i + str.length - 1);
+                        i = i + str.length;
+                        j++;
                     }
                 }else {
                     Toast.makeText(this, "Invalid input", Toast.LENGTH_SHORT).show();
+                    return false;
                 }
             }
         }
+
+        /*for (int k =0 ;k < positions.size(); k++) {
+            Log.d(TAG, "size of dotes after " + (positions.get(k) + 1) + ": " + dots[k+1].length());
+        }*/
+        return true;
     }
 
     public String separateNotes(String seq) {
@@ -156,6 +198,8 @@ public class MainActivity extends AppCompatActivity {
         public void run() {
             try {
                 isReleased = false;
+                int j = 0;
+
                 for (int i = 0; i < notesList.size() ; i++) {
 
                     Log.d(TAG, "note at " + (i+1) + ": " + notesList.get(i));
@@ -164,9 +208,11 @@ public class MainActivity extends AppCompatActivity {
 
                     mediaPlayer.start();
 
-                    if(dots.length > 0 && i < (dots.length-1)) {
-                        Log.d(TAG, "dots at " + i +": " + dots[i + 1].length());
-                        Thread.sleep(dots[i + 1].length() * 50);
+                    if(positions.size()>0 && j < positions.size() && positions.get(j) == i) {
+
+                        Log.d(TAG, "DOTS after " + (positions.get(j)+1) +": " + dots[j+1].length());
+                        Thread.sleep(dots[j+1].length() * 50);
+                        j++;
                     }
 
                     mediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
@@ -178,7 +224,6 @@ public class MainActivity extends AppCompatActivity {
                             mediaPlayer.release();
                         }
                     });
-
                 }
             }catch (InterruptedException e) {
                 e.printStackTrace();
@@ -188,6 +233,8 @@ public class MainActivity extends AppCompatActivity {
                     mediaPlayer.stop();
                     mediaPlayer.release();
                     isReleased = true;
+                    //sendEmptyMessage to signify sound sequence finished or stopped
+                    handler.sendEmptyMessage(0);
                 }
             }
         }
